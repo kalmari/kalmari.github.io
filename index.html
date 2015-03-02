@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+    <meta charset="UTF-8">
+    <title></title>
+    <link rel="stylesheet" type="text/css" href="bower_components/bootstrap-css-only/css/bootstrap.css">
+    <style>
+        * {
+            list-style: none;
+        }
+
+        .carousel-inner .item {
+            width: 400px;
+            height: 200px;
+        }
+
+        html, body, #map-canvas {
+            height: 100%; margin: 0; padding: 0;
+        }
+    </style>
+</head>
+<body ng-app="myApp" ng-controller="MainCtrl">
+<ul>
+    <li ng-repeat="apartment in apartments" style="display: inline-block;">
+        <carousel>
+            <slide ng-repeat="photo in apartment.photos" active="slide.active">
+                <img ng-src="{{photo}}"
+                     style="margin:auto; max-height:100%; max-width:100%; width: auto; height : auto;">
+            </slide>
+        </carousel>
+    </li>
+</ul>
+<div google-map apartments="apartments" id="map-canvas"></div>
+
+<script src="http://maps.googleapis.com/maps/api/js?key=AIzaSyAG1BCInkgefXfpOhNGL7W4rGFJvAuT17k&libraries=geometry"></script>
+<script src="bower_components/lodash/lodash.js"></script>
+<script src="bower_components/jquery/dist/jquery.js"></script>
+<script src="bower_components/angular/angular.js"></script>
+<script src="bower_components/angular-bootstrap/ui-bootstrap-tpls.js"></script>
+<script>
+    var myApp = angular.module('myApp', ['ui.bootstrap'])
+
+    myApp.run(function() {
+
+    })
+
+    myApp.controller('MainCtrl', function($scope, $http) {
+        $http.get('http://128.199.121.151:9200/apartments/_search?type=apartment&pretty=1&size=10&q=verified:true').success(function(data) {
+            $scope.apartments = _.map(data.hits.hits, function(hit) {
+                var source = hit._source
+//                var description = JSON.parse(source.description)
+                var photos = _.map(source.photos, 'm')
+                if (!photos.length) {
+                    photos = ['noimage.jpg']
+                }
+                return {
+                    address: source.address,
+                    photos: photos,
+                    price: source.price
+                }
+            })
+            console.log($scope.apartments)
+        })
+    })
+
+    myApp.directive('googleMap', function() {
+        return {
+            scope: {
+                apartments: '='
+            },
+            link: function(scope, element, attrs) {
+                var map = new google.maps.Map(element[0], {
+                    zoom: 11
+                })
+
+                scope.$watch(function() {
+                    return scope.apartments
+                }, function() {
+                    if (scope.apartments) {
+                        var bounds = new google.maps.LatLngBounds()
+                        _.each(scope.apartments, function(apartment) {
+                            var location = apartment.address.location
+                            if (apartment.address.location) {
+                                apartment.address.location = new google.maps.LatLng(location.lat, location.lon)
+                                bounds.extend(apartment.address.location)
+                            }
+                        })
+                        map.fitBounds(bounds)
+
+                        google.maps.event.addListener(map, 'bounds_changed', function() {
+                            console.log(map.getBounds())
+                            scope.$apply()
+                        })
+
+                        _.each(scope.apartments, function(apartment) {
+                            var marker = new google.maps.Marker({
+                                position: apartment.address.location,
+                                map: map,
+                                title: 'lol',
+                                icon: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png'
+                            })
+//
+////TODO implement this approach http://stackoverflow.com/questions/18404948/preventing-google-maps-move-after-displaying-infowindow
+//                    var hotelInfoWindow =  new google.maps.InfoWindow({
+//                        content: hotel.DisplayName + '<br/>Нажмите для перехода в режим карты',
+//                        position: hotel.loc,
+//                        disableAutoPan : true
+//                    });
+//
+//                    google.maps.event.addListener(marker, 'mouseover', function() {
+//                        hotel.hovered = true
+//                        hotelInfoWindow.open(map, marker)
+//                        scope.$apply()
+//                    })
+//                    google.maps.event.addListener(marker, 'mouseout', function() {
+//                        hotel.hovered = false
+//                        hotelInfoWindow.close()
+//                        scope.$apply()
+//                    })
+//                    google.maps.event.addListener(marker, 'click', function() {
+//                        activeHotel(hotel)
+//                        hotelsState.mapMode(hotel)
+//                        scope.$apply()
+//                    })
+//
+//                    scope.$watch(function() {
+//                        return [hotel.filtered, hotel.index, hotel.hovered, hotelsState.getOrigin()]
+//                    }, function() {
+//                        var icon =
+//                                        hotel == hotelsState.getOrigin() ? 'http://chart.apis.google.com/chart?chst=d_map_pin_shadow' :
+//                                                hotel.hovered ? 'http://maps.google.com/mapfiles/ms/icons/yellow-dot.png' :
+//                                                        hotel.index ? 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png' :
+//                                                                hotel.filtered ? 'http://maps.google.com/mapfiles/ms/icons/green-dot.png' :
+//                                                                        'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
+//                                title = hotel.index ? hotel.index.toString() : 'lol'
+//
+//                        marker.setIcon(icon)
+//                        marker.setTitle(title)
+//                    }, true)
+                        })
+                    }
+                })
+            }
+        }
+    })
+</script>
+</body>
+</html>
