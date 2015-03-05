@@ -6,32 +6,79 @@
     <link rel="stylesheet" type="text/css" href="bower_components/bootstrap-css-only/css/bootstrap.css">
     <style>
         * {
+            box-sizing: border-box;
             list-style: none;
         }
 
         .carousel-inner .item {
-            width: 400px;
             height: 200px;
         }
 
         html, body, #map-canvas {
-            height: 100%; margin: 0; padding: 0;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            position: absolute;
+        }
+
+        .apartments-list {
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 60%;
+            overflow-y: scroll;
+            background: #f7f7f7;
+        }
+
+        .apartment {
+            width: 50%;
+            float: left;
+            border: 1px solid black;
+            padding: 5px;
+        }
+
+        .apartment.active {
+            border: 2px solid blue;
+        }
+
+        .apartment.selected {
+            border: 2px solid green;
+        }
+
+        .map-container {
+            position: fixed;
+            top: 47px;
+            right: 0;
+            left: auto;
+            bottom: 0;
+            width: 40%;
         }
     </style>
 </head>
 <body ng-app="myApp" ng-controller="MainCtrl">
-<ul>
-    <li ng-repeat="apartment in apartments" style="display: inline-block;">
-        <carousel>
-            <slide ng-repeat="photo in apartment.photos" active="slide.active">
-                <img ng-src="{{photo}}"
-                     style="margin:auto; max-height:100%; max-width:100%; width: auto; height : auto;">
-            </slide>
-        </carousel>
-    </li>
-</ul>
-<div google-map apartments="apartments" id="map-canvas"></div>
-
+<div class="container">
+    <div class="apartments-list">
+        <ul>
+            <li ng-repeat="apartment in apartments" class="apartment" style="display: inline-block;"
+                ng-class="{active: apartment.hovered, selected: apartment.selected}">
+                <a ng-href="{{'http://vk.com/id' + apartment.vkUserId}}">Ссылка на профиль пользователя</a>
+                <carousel>
+                    <slide ng-repeat="photo in apartment.photos" active="slide.active">
+                        <img ng-src="{{photo}}"
+                             style="margin:auto; max-height:100%; max-width:100%; width: auto; height : auto;">
+                    </slide>
+                </carousel>
+            </li>
+        </ul>
+    </div>
+    <div class="map-container">
+        <div google-map apartments="apartments" id="map-canvas"></div>
+    </div>
+</div>
 <script src="http://maps.googleapis.com/maps/api/js?key=AIzaSyAG1BCInkgefXfpOhNGL7W4rGFJvAuT17k&libraries=geometry"></script>
 <script src="bower_components/lodash/lodash.js"></script>
 <script src="bower_components/jquery/dist/jquery.js"></script>
@@ -44,84 +91,160 @@
 
     })
 
-    myApp.controller('MainCtrl', function($scope, $http) {
-        $http.get('http://128.199.121.151:9200/apartments/_search?type=apartment&pretty=1&size=10&q=verified:true').success(function(data) {
-            $scope.apartments = _.map(data.hits.hits, function(hit) {
-                var source = hit._source
-//                var description = JSON.parse(source.description)
-                var photos = _.map(source.photos, 'm')
-                if (!photos.length) {
-                    photos = ['noimage.jpg']
-                }
-                return {
-                    address: source.address,
-                    photos: photos,
-                    price: source.price
-                }
-            })
-            console.log($scope.apartments)
-        })
+    myApp.factory('apartmentsData', function($http) {
+        var _apartmentsData = null
+
+        var currentPage = 0
+        var pageSize = 8
+        var query = JSON.stringify({"query": {"constant_score": {"filter": {"exists": {"field": "address"}}}}})
+
+        return {
+            setBounds: function(bounds) {
+                var ne = bounds.getNorthEast()
+                var sw = bounds.getSouthWest()
+                var n = ne.lat()
+                var e = ne.lng()
+                var s = sw.lat()
+                var w = sw.lng()
+                query = JSON.stringify({
+                    "filter": {
+                        "geo_bounding_box": {
+                            "address.location": {
+                                "top_left": {
+                                    "lat": n,
+                                    "lon": w
+                                },
+                                "bottom_right": {
+                                    "lat": s,
+                                    "lon": e
+                                }
+                            }
+                        }
+                    }
+                })
+            },
+            load: function() {
+                $http.post('http://128.199.121.151:9200/apartments/apartment/_search?type=apartment&pretty=1&size=' + pageSize, query).success(function(data) {
+                    var total = data.hits.total
+                    _apartmentsData = _.map(data.hits.hits, function(hit) {
+                        var source = hit._source
+                        var photos = _.map(source.photos, 'm')
+                        if (!photos.length) {
+                            photos = ['noimage.jpg']
+                        }
+                        return {
+                            address: source.address,
+                            photos: photos,
+                            price: source.price,
+                            date: new Date(source.posted_date),
+                            vkUserId: source.owner,
+                            description: source.description
+                        }
+                    })
+                    return _apartmentsData
+                })
+            },
+            get: function() {
+                return _apartmentsData
+            }
+        }
     })
 
-    myApp.directive('googleMap', function() {
-        return {
-            scope: {
-                apartments: '='
-            },
-            link: function(scope, element, attrs) {
-                var map = new google.maps.Map(element[0], {
-                    zoom: 11
-                })
+    myApp.controller('MainCtrl', function($scope, apartmentsData) {
+        apartmentsData.load()
+        $scope.$watch(function() {
+            return apartmentsData.get()
+        }, function(newValue) {
+            $scope.apartments = newValue
+        }, true)
+    })
 
-                scope.$watch(function() {
-                    return scope.apartments
-                }, function() {
-                    if (scope.apartments) {
-                        var bounds = new google.maps.LatLngBounds()
-                        _.each(scope.apartments, function(apartment) {
-                            var location = apartment.address.location
-                            if (apartment.address.location) {
+    myApp.directive('googleMap', function(apartmentsData) {
+        return {
+            link: function(scope, element, attrs) {
+                var initialized, map, bounds, markers = []
+
+                function clearMarkers() {
+                    _.each(markers, function(marker) {
+                        marker.setMap(map);
+                    })
+                }
+
+                function initialize(apartments) {
+                    if (!initialized) {
+                        map = new google.maps.Map(element[0], {
+                            scrollwheel: false,
+                            navigationControl: false,
+                            mapTypeControl: false,
+                            scaleControl: false,
+                            mapTypeId: google.maps.MapTypeId.ROADMAP,
+                            zoom: 11
+                        })
+
+                        var apartmentsBounds = new google.maps.LatLngBounds()
+                        _.each(apartments, function(apartment) {
+                            if (apartment.address && apartment.address.location) {
+                                var location = apartment.address.location
                                 apartment.address.location = new google.maps.LatLng(location.lat, location.lon)
-                                bounds.extend(apartment.address.location)
+                                apartmentsBounds.extend(apartment.address.location)
                             }
                         })
-                        map.fitBounds(bounds)
+                        map.fitBounds(apartmentsBounds)
+                        initialized = true
+                    }
+                }
 
-                        google.maps.event.addListener(map, 'bounds_changed', function() {
-                            console.log(map.getBounds())
-                            scope.$apply()
+                scope.$watch(function() {
+                    return apartmentsData.get()
+                }, function(apartments) {
+                    if (apartments) {
+                        initialize(apartments)
+
+                        google.maps.event.clearListeners(map, 'bounds_changed');
+
+                        google.maps.event.addListener(map, 'idle', function() {
+                            var previousBounds = bounds
+                            bounds = map.getBounds()
+                            if (previousBounds && !bounds.equals(previousBounds)) {
+                                apartmentsData.setBounds(map.getBounds())
+                                apartmentsData.load()
+                                scope.$apply()
+                            }
                         })
 
-                        _.each(scope.apartments, function(apartment) {
-                            var marker = new google.maps.Marker({
+                        _.each(apartments, function(apartment) {
+                            if (apartment.address && apartment.address.location) {
+                                var marker = new google.maps.Marker({
+                                    position: apartment.address.location,
+                                    map: map,
+                                    title: 'lol',
+                                    icon: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png'
+                                })
+                                markers.push(marker);
+                            }
+
+                            var apartmentInfoWindow = new google.maps.InfoWindow({
+                                content: apartment.description,
                                 position: apartment.address.location,
-                                map: map,
-                                title: 'lol',
-                                icon: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png'
+                                disableAutoPan: true
+                            });
+
+                            google.maps.event.addListener(marker, 'mouseover', function() {
+                                apartment.hovered = true
+                                apartmentInfoWindow.open(map, marker)
+                                scope.$apply()
                             })
+                            google.maps.event.addListener(marker, 'mouseout', function() {
+                                apartment.hovered = false
+                                apartmentInfoWindow.close()
+                                scope.$apply()
+                            })
+                            google.maps.event.addListener(marker, 'click', function() {
+                                apartment.selected = !apartment.selected
+                                scope.$apply()
+                            })
+
 //
-////TODO implement this approach http://stackoverflow.com/questions/18404948/preventing-google-maps-move-after-displaying-infowindow
-//                    var hotelInfoWindow =  new google.maps.InfoWindow({
-//                        content: hotel.DisplayName + '<br/>Нажмите для перехода в режим карты',
-//                        position: hotel.loc,
-//                        disableAutoPan : true
-//                    });
-//
-//                    google.maps.event.addListener(marker, 'mouseover', function() {
-//                        hotel.hovered = true
-//                        hotelInfoWindow.open(map, marker)
-//                        scope.$apply()
-//                    })
-//                    google.maps.event.addListener(marker, 'mouseout', function() {
-//                        hotel.hovered = false
-//                        hotelInfoWindow.close()
-//                        scope.$apply()
-//                    })
-//                    google.maps.event.addListener(marker, 'click', function() {
-//                        activeHotel(hotel)
-//                        hotelsState.mapMode(hotel)
-//                        scope.$apply()
-//                    })
 //
 //                    scope.$watch(function() {
 //                        return [hotel.filtered, hotel.index, hotel.hovered, hotelsState.getOrigin()]
