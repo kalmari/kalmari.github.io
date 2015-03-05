@@ -37,7 +37,7 @@
         .apartment {
             width: 50%;
             float: left;
-            border: 1px solid black;
+            border: 2px solid black;
             padding: 5px;
         }
 
@@ -57,6 +57,13 @@
             bottom: 0;
             width: 40%;
         }
+
+        .truncate {
+            width: 100%;
+            height: 60px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
     </style>
 </head>
 <body ng-app="myApp" ng-controller="MainCtrl">
@@ -65,7 +72,8 @@
         <ul>
             <li ng-repeat="apartment in apartments" class="apartment" style="display: inline-block;"
                 ng-class="{active: apartment.hovered, selected: apartment.selected}">
-                <a ng-href="{{'http://vk.com/id' + apartment.vkUserId}}">Ссылка на профиль пользователя</a>
+                <div class="truncate">{{apartment.description}}</div>
+                <a ng-href="{{'http://vk.com/id' + apartment.vkUserId}}">vk</a>
                 <carousel>
                     <slide ng-repeat="photo in apartment.photos" active="slide.active">
                         <img ng-src="{{photo}}"
@@ -132,7 +140,11 @@
                         if (!photos.length) {
                             photos = ['noimage.jpg']
                         }
+                        var location = source.address && source.address.location && new google.maps.LatLng(source.address.location.lat, source.address.location.lon)
+
                         return {
+                            ts: new Date(), // to force watch to trigger on each ajax request
+                            location: location,
                             address: source.address,
                             photos: photos,
                             price: source.price,
@@ -168,6 +180,7 @@
                     _.each(markers, function(marker) {
                         marker.setMap(map);
                     })
+                    markers = []
                 }
 
                 function initialize(apartments) {
@@ -183,10 +196,8 @@
 
                         var apartmentsBounds = new google.maps.LatLngBounds()
                         _.each(apartments, function(apartment) {
-                            if (apartment.address && apartment.address.location) {
-                                var location = apartment.address.location
-                                apartment.address.location = new google.maps.LatLng(location.lat, location.lon)
-                                apartmentsBounds.extend(apartment.address.location)
+                            if (apartment.location) {
+                                apartmentsBounds.extend(apartment.location)
                             }
                         })
                         map.fitBounds(apartmentsBounds)
@@ -200,7 +211,9 @@
                     if (apartments) {
                         initialize(apartments)
 
+                        clearMarkers()
                         google.maps.event.clearListeners(map, 'bounds_changed');
+
 
                         google.maps.event.addListener(map, 'idle', function() {
                             var previousBounds = bounds
@@ -213,9 +226,9 @@
                         })
 
                         _.each(apartments, function(apartment) {
-                            if (apartment.address && apartment.address.location) {
+                            if (apartment.address && apartment.location) {
                                 var marker = new google.maps.Marker({
-                                    position: apartment.address.location,
+                                    position: apartment.location,
                                     map: map,
                                     title: 'lol',
                                     icon: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png'
@@ -225,7 +238,7 @@
 
                             var apartmentInfoWindow = new google.maps.InfoWindow({
                                 content: apartment.description,
-                                position: apartment.address.location,
+                                position: apartment.location,
                                 disableAutoPan: true
                             });
 
@@ -234,6 +247,7 @@
                                 apartmentInfoWindow.open(map, marker)
                                 scope.$apply()
                             })
+
                             google.maps.event.addListener(marker, 'mouseout', function() {
                                 apartment.hovered = false
                                 apartmentInfoWindow.close()
