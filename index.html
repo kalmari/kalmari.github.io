@@ -173,6 +173,9 @@
 
     myApp.directive('googleMap', function(apartmentsData) {
         return {
+            scope: {
+                apartments: '='
+            },
             link: function(scope, element, attrs) {
                 var initialized, map, bounds, markers = []
 
@@ -206,7 +209,7 @@
                 }
 
                 scope.$watch(function() {
-                    return apartmentsData.get()
+                    return scope.apartments
                 }, function(apartments) {
                     if (apartments) {
                         initialize(apartments)
